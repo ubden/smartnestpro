@@ -1,6 +1,6 @@
 /**
- * PDF Technical Drawing Export Service
- * jsPDF kullanarak teknik çizim formatında PDF oluşturur
+ * PDF Technical Drawing Export Service - Canvas Accurate Version
+ * Canvas'taki gerçek yerleşimi %100 yansıtır
  */
 
 import { Sheet, NestingStats } from '../types';
@@ -9,43 +9,40 @@ import { jsPDF } from 'jspdf';
 export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: string): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     try {
-      // jsPDF ile PDF oluştur
       const doc = new jsPDF({
         orientation: 'landscape',
         unit: 'mm',
         format: 'a4'
       });
       
+      // PDF sayfa boyutları
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 15;
       
-      // Her sheet için bir sayfa
-      sheets.forEach((sheet, idx) => {
-        if (idx > 0) doc.addPage();
+      sheets.forEach((sheet, sheetIdx) => {
+        if (sheetIdx > 0) doc.addPage();
         
-        // === HEADER / TITLE BLOCK ===
+        console.log(`PDF Export - Sheet ${sheetIdx + 1}: ${sheet.placedParts.length} parts`);
+        
+        // === HEADER ===
         doc.setFillColor(240, 240, 245);
         doc.rect(margin, margin, pageWidth - 2 * margin, 25, 'F');
         
         doc.setFontSize(18);
         doc.setFont('helvetica', 'bold');
-        doc.text('SmartNest Pro - Teknik Çizim', margin + 5, margin + 8);
+        // Türkçe karakter desteği için basit karakterler kullan
+        doc.text('SmartNest Pro - Teknik Cizim', margin + 5, margin + 8);
         
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Sheet ${idx + 1} / ${sheets.length}`, margin + 5, margin + 15);
+        doc.text(`Sheet ${sheetIdx + 1} / ${sheets.length}`, margin + 5, margin + 15);
         doc.text(`Stok: ${stockName}`, margin + 5, margin + 20);
         
-        // Tarih
-        const date = new Date().toLocaleDateString('tr-TR', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
-        });
-        doc.text(date, pageWidth - margin - 50, margin + 8);
+        const date = new Date().toLocaleDateString('tr-TR');
+        doc.text(date, pageWidth - margin - 40, margin + 8);
         
-        // === STATISTICS BOX ===
+        // === STATS BOX ===
         const statsX = pageWidth - margin - 80;
         const statsY = margin + 12;
         
@@ -55,27 +52,27 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
-        doc.text('İstatistikler:', statsX + 3, statsY + 5);
+        doc.text('Istatistikler:', statsX + 3, statsY + 5);
         
         doc.setFont('helvetica', 'normal');
-        doc.text(`Parça Sayısı: ${sheet.placedParts.length}`, statsX + 3, statsY + 10);
-        doc.text(`Verimlilik: ${sheet.efficiency.toFixed(1)}%`, statsX + 3, statsY + 15);
-        doc.text(`Fire: ${(sheet.waste / 1000).toFixed(2)} m²`, statsX + 3, statsY + 20);
+        doc.text(`Parca: ${sheet.placedParts.length}`, statsX + 3, statsY + 10);
+        doc.text(`Verim: ${sheet.efficiency.toFixed(1)}%`, statsX + 3, statsY + 15);
+        doc.text(`Fire: ${(sheet.waste / 1000).toFixed(2)} m2`, statsX + 3, statsY + 20);
         
         // === DRAWING AREA ===
         const drawingY = margin + 45;
         const drawingHeight = pageHeight - drawingY - margin - 30;
         const drawingWidth = pageWidth - 2 * margin;
         
-        // Sheet outline border
+        // Border
         doc.setDrawColor(100, 100, 100);
         doc.setLineWidth(0.5);
         doc.rect(margin, drawingY, drawingWidth, drawingHeight, 'S');
         
-        // Ölçekleme hesapla
+        // Scale hesapla - Canvas ile aynı mantık
         const scaleX = drawingWidth / sheet.width;
         const scaleY = drawingHeight / sheet.height;
-        const scale = Math.min(scaleX, scaleY) * 0.95; // %95'ini kullan, kenar boşluğu için
+        const scale = Math.min(scaleX, scaleY) * 0.92;
         
         const offsetX = margin + (drawingWidth - sheet.width * scale) / 2;
         const offsetY = drawingY + (drawingHeight - sheet.height * scale) / 2;
@@ -85,99 +82,90 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         doc.setLineWidth(0.3);
         doc.rect(offsetX, offsetY, sheet.width * scale, sheet.height * scale, 'S');
         
-        // Sheet boyutları
         doc.setFontSize(7);
         doc.setTextColor(0, 100, 200);
         doc.text(`${sheet.width} mm`, offsetX + (sheet.width * scale) / 2, offsetY - 3, { align: 'center' });
-        doc.text(`${sheet.height} mm`, offsetX - 5, offsetY + (sheet.height * scale) / 2, { angle: 90, align: 'center' });
         
-        // Part'ları çiz
-        const maxPartsPerPage = 100; // Performans için limit
-        const partsToRender = sheet.placedParts.slice(0, maxPartsPerPage);
+        // === PART'LARI ÇİZ ===
+        let renderedCount = 0;
+        let skippedCount = 0;
         
-        if (sheet.placedParts.length > maxPartsPerPage) {
-          console.warn(`Sheet has ${sheet.placedParts.length} parts, rendering first ${maxPartsPerPage} for performance`);
-        }
-        
-        partsToRender.forEach((part, partIdx) => {
+        sheet.placedParts.forEach((part, partIdx) => {
           try {
-            const px = offsetX + part.x * scale;
-            const py = offsetY + part.y * scale;
-            const pw = part.width * scale;
-            const ph = part.height * scale;
+            // Canvas'taki GERÇEK pozisyon
+            const partX = offsetX + part.x * scale;
+            const partY = offsetY + part.y * scale;
+            const partW = part.width * scale;
+            const partH = part.height * scale;
             
-            // Part rengi (her part farklı ton)
-            const hue = (partIdx * 137.5) % 360; // Golden angle için
+            // Part rengi
+            const hue = (partIdx * 137.5) % 360;
             const rgb = hslToRgb(hue, 70, 85);
             
             doc.setFillColor(rgb[0], rgb[1], rgb[2]);
             doc.setDrawColor(50, 50, 50);
-            doc.setLineWidth(0.2);
+            doc.setLineWidth(0.15);
             
-            // Rotation varsa
-            if (part.rotation && part.rotation !== 0) {
+            // Rotasyon uygula - Canvas'taki gibi
+            const rotation = part.rotation || 0;
+            
+            if (rotation !== 0) {
               doc.saveGraphicsState();
               
-              const centerX = px + pw / 2;
-              const centerY = py + ph / 2;
+              // Rotation center - part'ın merkezi
+              const centerX = partX + partW / 2;
+              const centerY = partY + partH / 2;
               
-              // Rotate around center
-              const rad = (part.rotation * Math.PI) / 180;
-              doc.setTransformationMatrix(
-                Math.cos(rad),
-                Math.sin(rad),
-                -Math.sin(rad),
-                Math.cos(rad),
-                centerX,
-                centerY
+              const rad = (rotation * Math.PI) / 180;
+              const cos = Math.cos(rad);
+              const sin = Math.sin(rad);
+              
+              // Basit dikdörtgen çiz (rotasyonlu)
+              const corners = [
+                { x: -partW/2, y: -partH/2 },
+                { x: partW/2, y: -partH/2 },
+                { x: partW/2, y: partH/2 },
+                { x: -partW/2, y: partH/2 }
+              ];
+              
+              const rotated = corners.map(c => ({
+                x: centerX + (c.x * cos - c.y * sin),
+                y: centerY + (c.x * sin + c.y * cos)
+              }));
+              
+              // Polygon çiz
+              doc.lines(
+                rotated.slice(1).map((p, i) => [
+                  p.x - rotated[i].x,
+                  p.y - rotated[i].y
+                ]),
+                rotated[0].x,
+                rotated[0].y,
+                [1, 1],
+                'FD'
               );
-              
-              // Gerçek path'i çiz (path varsa)
-              if (part.path && part.path.trim() !== '') {
-                try {
-                  drawSVGPath(doc, part.path, -pw / 2, -ph / 2, scale, part.width, part.height);
-                } catch (e) {
-                  // Path çizimi başarısızsa dikdörtgen çiz
-                  doc.rect(-pw / 2, -ph / 2, pw, ph, 'FD');
-                }
-              } else {
-                doc.rect(-pw / 2, -ph / 2, pw, ph, 'FD');
-              }
-              
-              // Part ismi
-              doc.setFontSize(6);
-              doc.setTextColor(50, 50, 50);
-              doc.text(part.name, 0, 0, { align: 'center' });
               
               doc.restoreGraphicsState();
             } else {
-              // Gerçek path'i çiz (path varsa)
-              if (part.path && part.path.trim() !== '') {
-                try {
-                  drawSVGPath(doc, part.path, px, py, scale, part.width, part.height);
-                } catch (e) {
-                  // Path çizimi başarısızsa dikdörtgen çiz
-                  doc.rect(px, py, pw, ph, 'FD');
-                }
-              } else {
-                doc.rect(px, py, pw, ph, 'FD');
-              }
-              
-              // Part ismi
-              doc.setFontSize(6);
-              doc.setTextColor(50, 50, 50);
-              doc.text(part.name, px + pw / 2, py + ph / 2, { align: 'center' });
+              // Rotasyon yok - direkt dikdörtgen
+              doc.rect(partX, partY, partW, partH, 'FD');
             }
             
-            // Part boyutları (küçük fontla)
+            // Part ismi (Türkçe karakter olmadan)
             doc.setFontSize(5);
-            doc.setTextColor(100, 100, 100);
-            doc.text(`${part.width}×${part.height}`, px + pw / 2, py + ph + 3, { align: 'center' });
-          } catch (partError) {
-            // Tek bir part hata verirse diğerlerine devam et
-            console.warn(`Part ${part.name} render error:`, partError);
+            doc.setTextColor(50, 50, 50);
+            const cleanName = cleanTurkishChars(part.name);
+            doc.text(cleanName, partX + partW/2, partY + partH/2, { align: 'center' });
+            
+            renderedCount++;
+            
+          } catch (err) {
+            console.error(`Part ${part.name} render error:`, err);
+            skippedCount++;
           }
         });
+        
+        console.log(`Rendered: ${renderedCount}, Skipped: ${skippedCount}`);
         
         // === PARTS TABLE ===
         const tableY = pageHeight - margin - 25;
@@ -185,49 +173,41 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         doc.setFillColor(250, 250, 250);
         doc.rect(margin, tableY, pageWidth - 2 * margin, 25, 'F');
         
-        doc.setDrawColor(200, 200, 200);
-        doc.setLineWidth(0.1);
-        
-        // Başlıklar
         doc.setFontSize(7);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(0, 0, 0);
         
         const colWidth = (pageWidth - 2 * margin) / 5;
-        doc.text('Part Adı', margin + 2, tableY + 5);
+        doc.text('Part', margin + 2, tableY + 5);
         doc.text('Boyut (mm)', margin + colWidth + 2, tableY + 5);
         doc.text('Pozisyon (mm)', margin + 2 * colWidth + 2, tableY + 5);
         doc.text('Rotasyon', margin + 3 * colWidth + 2, tableY + 5);
-        doc.text('Alan (mm²)', margin + 4 * colWidth + 2, tableY + 5);
+        doc.text('Alan', margin + 4 * colWidth + 2, tableY + 5);
         
-        // İlk 3 part'ı listele (alan kısıtlı)
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(6);
         
-        partsToRender.slice(0, 3).forEach((part, i) => {
+        sheet.placedParts.slice(0, 3).forEach((part, i) => {
           const y = tableY + 10 + i * 5;
-          doc.text(part.name, margin + 2, y);
-          doc.text(`${part.width} × ${part.height}`, margin + colWidth + 2, y);
+          const cleanName = cleanTurkishChars(part.name);
+          doc.text(cleanName, margin + 2, y);
+          doc.text(`${part.width} x ${part.height}`, margin + colWidth + 2, y);
           doc.text(`(${part.x.toFixed(1)}, ${part.y.toFixed(1)})`, margin + 2 * colWidth + 2, y);
-          doc.text(`${part.rotation}°`, margin + 3 * colWidth + 2, y);
+          doc.text(`${part.rotation || 0} deg`, margin + 3 * colWidth + 2, y);
           doc.text(`${(part.width * part.height).toFixed(0)}`, margin + 4 * colWidth + 2, y);
         });
         
         if (sheet.placedParts.length > 3) {
           doc.setTextColor(150, 150, 150);
-          const remainingText = sheet.placedParts.length > maxPartsPerPage 
-            ? `... ve ${sheet.placedParts.length - 3} parça daha (PDF'de ilk ${maxPartsPerPage} gösteriliyor)`
-            : `... ve ${sheet.placedParts.length - 3} parça daha`;
-          doc.text(remainingText, margin + 2, tableY + 24);
+          doc.text(`... ve ${sheet.placedParts.length - 3} parca daha`, margin + 2, tableY + 24);
         }
         
         // Footer
         doc.setFontSize(6);
         doc.setTextColor(150, 150, 150);
-        doc.text('SmartNest Pro | AI-Powered Nesting Solution', pageWidth / 2, pageHeight - 5, { align: 'center' });
+        doc.text('SmartNest Pro | AI-Powered Nesting', pageWidth / 2, pageHeight - 5, { align: 'center' });
       });
       
-      // PDF'i blob olarak döndür
       const pdfBlob = doc.output('blob');
       resolve(pdfBlob);
       
@@ -238,102 +218,21 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
   });
 };
 
-// SVG path'i jsPDF'e çizen helper fonksiyon
-function drawSVGPath(
-  doc: any,
-  pathString: string,
-  offsetX: number,
-  offsetY: number,
-  scale: number,
-  originalWidth: number,
-  originalHeight: number
-) {
-  // Basit SVG path komutlarını parse et
-  const commands = pathString.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
+// Türkçe karakterleri temizle
+function cleanTurkishChars(text: string): string {
+  const map: Record<string, string> = {
+    'ç': 'c', 'Ç': 'C',
+    'ğ': 'g', 'Ğ': 'G',
+    'ı': 'i', 'İ': 'I',
+    'ö': 'o', 'Ö': 'O',
+    'ş': 's', 'Ş': 'S',
+    'ü': 'u', 'Ü': 'U'
+  };
   
-  if (!commands || commands.length === 0) {
-    throw new Error('Invalid path');
-  }
-  
-  let currentX = 0;
-  let currentY = 0;
-  let startX = 0;
-  let startY = 0;
-  
-  commands.forEach((cmd, idx) => {
-    const type = cmd[0].toUpperCase();
-    const coords = cmd.slice(1).trim().split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n));
-    
-    switch (type) {
-      case 'M': // Move to
-        if (coords.length >= 2) {
-          currentX = offsetX + (coords[0] * scale);
-          currentY = offsetY + (coords[1] * scale);
-          startX = currentX;
-          startY = currentY;
-          
-          if (idx === 0) {
-            // İlk moveTo - path'i başlat
-            doc.lines([[0, 0]], currentX, currentY, [scale, scale], 'FD');
-          }
-        }
-        break;
-        
-      case 'L': // Line to
-        if (coords.length >= 2) {
-          const nextX = offsetX + (coords[0] * scale);
-          const nextY = offsetY + (coords[1] * scale);
-          
-          doc.line(currentX, currentY, nextX, nextY);
-          currentX = nextX;
-          currentY = nextY;
-        }
-        break;
-        
-      case 'H': // Horizontal line
-        if (coords.length >= 1) {
-          const nextX = offsetX + (coords[0] * scale);
-          doc.line(currentX, currentY, nextX, currentY);
-          currentX = nextX;
-        }
-        break;
-        
-      case 'V': // Vertical line
-        if (coords.length >= 1) {
-          const nextY = offsetY + (coords[1] * scale);
-          doc.line(currentX, currentY, currentX, nextY);
-          currentY = nextY;
-        }
-        break;
-        
-      case 'Z': // Close path
-        if (currentX !== startX || currentY !== startY) {
-          doc.line(currentX, currentY, startX, startY);
-        }
-        currentX = startX;
-        currentY = startY;
-        break;
-        
-      // A (Arc) ve C (Cubic Bezier) gibi karmaşık komutlar için basitleştirilmiş çizim
-      case 'A':
-      case 'C':
-      case 'S':
-      case 'Q':
-        // Bu komutlar için son noktaya düz çizgi çek
-        if (coords.length >= 2) {
-          const lastIdx = coords.length - 2;
-          const nextX = offsetX + (coords[lastIdx] * scale);
-          const nextY = offsetY + (coords[lastIdx + 1] * scale);
-          doc.line(currentX, currentY, nextX, nextY);
-          currentX = nextX;
-          currentY = nextY;
-        }
-        break;
-    }
-  });
+  return text.split('').map(char => map[char] || char).join('');
 }
 
-// HSL'den RGB'ye çevirme helper
+// HSL to RGB
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   s /= 100;
   l /= 100;

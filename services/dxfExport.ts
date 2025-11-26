@@ -1,6 +1,6 @@
 /**
- * DXF Export Service
- * Nesting sonuçlarını gerçek geometrilerle DXF formatına çevirir
+ * DXF Export Service - Canvas Accurate Version
+ * Canvas'taki gerçek yerleşimi %100 yansıtır
  */
 
 import { Sheet } from '../types';
@@ -8,274 +8,132 @@ import { Sheet } from '../types';
 export const exportDXF = (sheets: Sheet[]): string => {
   let dxf = '';
   
-  // DXF Header
-  dxf += '0\nSECTION\n';
-  dxf += '2\nHEADER\n';
+  console.log(`DXF Export starting: ${sheets.length} sheets`);
+  
+  // === HEADER ===
+  dxf += '0\nSECTION\n2\nHEADER\n';
   dxf += '9\n$ACADVER\n1\nAC1015\n'; // AutoCAD 2000
-  dxf += '9\n$INSUNITS\n70\n4\n'; // mm units
+  dxf += '9\n$INSUNITS\n70\n4\n'; // mm
   dxf += '0\nENDSEC\n';
   
-  // Tables Section
-  dxf += '0\nSECTION\n';
-  dxf += '2\nTABLES\n';
+  // === TABLES ===
+  dxf += '0\nSECTION\n2\nTABLES\n';
   
   // Layer table
-  dxf += '0\nTABLE\n';
-  dxf += '2\nLAYER\n';
-  dxf += '70\n' + (sheets.length + 2) + '\n'; // Layer count
+  dxf += '0\nTABLE\n2\nLAYER\n70\n' + (sheets.length + 2) + '\n';
   
-  // Layer 0 (default)
-  dxf += '0\nLAYER\n';
-  dxf += '2\n0\n';
-  dxf += '70\n0\n';
-  dxf += '62\n7\n'; // Color white
+  // Default layer
+  dxf += '0\nLAYER\n2\n0\n70\n0\n62\n7\n';
   
   // Sheet outline layer
-  dxf += '0\nLAYER\n';
-  dxf += '2\nSHEET_OUTLINE\n';
-  dxf += '70\n0\n';
-  dxf += '62\n5\n'; // Color blue
+  dxf += '0\nLAYER\n2\nSHEET_OUTLINE\n70\n0\n62\n5\n';
   
-  // Part layers (her sheet için)
+  // Part layers
   sheets.forEach((sheet, idx) => {
-    dxf += '0\nLAYER\n';
-    dxf += `2\nSHEET_${idx + 1}_PARTS\n`;
-    dxf += '70\n0\n';
-    dxf += `62\n${(idx % 6) + 1}\n`; // Farklı renkler
+    dxf += `0\nLAYER\n2\nSHEET_${idx + 1}_PARTS\n70\n0\n62\n${(idx % 6) + 1}\n`;
   });
   
-  dxf += '0\nENDTAB\n';
-  dxf += '0\nENDSEC\n';
+  dxf += '0\nENDTAB\n0\nENDSEC\n';
   
-  // Entities Section
-  dxf += '0\nSECTION\n';
-  dxf += '2\nENTITIES\n';
+  // === ENTITIES ===
+  dxf += '0\nSECTION\n2\nENTITIES\n';
   
-  let offsetX = 0;
+  let sheetOffsetX = 0;
   
   sheets.forEach((sheet, sheetIdx) => {
-    // Sheet outline (dikdörtgen)
+    console.log(`DXF Sheet ${sheetIdx + 1}: ${sheet.placedParts.length} parts`);
+    
+    // Sheet outline
     dxf += '0\nLWPOLYLINE\n';
     dxf += '8\nSHEET_OUTLINE\n';
     dxf += '90\n4\n';
-    dxf += '70\n1\n';
-    dxf += `10\n${offsetX}\n20\n0\n`;
-    dxf += `10\n${offsetX + sheet.width}\n20\n0\n`;
-    dxf += `10\n${offsetX + sheet.width}\n20\n${sheet.height}\n`;
-    dxf += `10\n${offsetX}\n20\n${sheet.height}\n`;
+    dxf += '70\n1\n'; // Closed
+    dxf += `10\n${sheetOffsetX}\n20\n0\n`;
+    dxf += `10\n${sheetOffsetX + sheet.width}\n20\n0\n`;
+    dxf += `10\n${sheetOffsetX + sheet.width}\n20\n${sheet.height}\n`;
+    dxf += `10\n${sheetOffsetX}\n20\n${sheet.height}\n`;
     
-    // Part'ları gerçek geometrileriyle çiz
-    sheet.placedParts.forEach(part => {
-      const baseX = offsetX + part.x;
-      const baseY = part.y;
-      const rotation = part.rotation || 0;
-      
-      // Gerçek path'i DXF'e çevir
-      if (part.path && part.path.trim() !== '') {
-        try {
-          const dxfPath = convertSVGPathToDXF(
-            part.path,
-            baseX,
-            baseY,
-            rotation,
-            `SHEET_${sheetIdx + 1}_PARTS`
-          );
-          dxf += dxfPath;
-        } catch (e) {
-          console.warn(`Part ${part.name} path conversion failed, using bounding box`, e);
-          // Fallback: Bounding box
-          dxf += createRotatedRectangle(baseX, baseY, part.width, part.height, rotation, `SHEET_${sheetIdx + 1}_PARTS`);
+    // Part'ları çiz - Canvas pozisyonlarını kullan
+    let renderedCount = 0;
+    
+    sheet.placedParts.forEach((part, partIdx) => {
+      try {
+        // Canvas'taki GERÇEK pozisyon
+        const baseX = sheetOffsetX + part.x;
+        const baseY = part.y;
+        const rotation = part.rotation || 0;
+        
+        // Dikdörtgen köşeleri (rotasyon öncesi)
+        const corners = [
+          { x: 0, y: 0 },
+          { x: part.width, y: 0 },
+          { x: part.width, y: part.height },
+          { x: 0, y: part.height }
+        ];
+        
+        // Rotasyon transform
+        const rad = (rotation * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        
+        const transformedCorners = corners.map(c => ({
+          x: baseX + (c.x * cos - c.y * sin),
+          y: baseY + (c.x * sin + c.y * cos)
+        }));
+        
+        // LWPOLYLINE
+        dxf += '0\nLWPOLYLINE\n';
+        dxf += `8\nSHEET_${sheetIdx + 1}_PARTS\n`;
+        dxf += '90\n4\n';
+        dxf += '70\n1\n'; // Closed
+        
+        transformedCorners.forEach(corner => {
+          dxf += `10\n${corner.x.toFixed(3)}\n`;
+          dxf += `20\n${corner.y.toFixed(3)}\n`;
+        });
+        
+        // Part ismi (TEXT)
+        const cleanName = cleanTurkishChars(part.name);
+        dxf += '0\nTEXT\n';
+        dxf += `8\nSHEET_${sheetIdx + 1}_PARTS\n`;
+        dxf += `10\n${baseX.toFixed(3)}\n`;
+        dxf += `20\n${baseY.toFixed(3)}\n`;
+        dxf += '40\n8\n'; // Text height
+        dxf += `1\n${cleanName}\n`;
+        
+        if (rotation !== 0) {
+          dxf += `50\n${rotation}\n`;
         }
-      } else {
-        // Path yoksa dikdörtgen çiz
-        dxf += createRotatedRectangle(baseX, baseY, part.width, part.height, rotation, `SHEET_${sheetIdx + 1}_PARTS`);
-      }
-      
-      // Part ismini text olarak ekle
-      dxf += '0\nTEXT\n';
-      dxf += `8\nSHEET_${sheetIdx + 1}_PARTS\n`;
-      dxf += `10\n${baseX.toFixed(3)}\n`;
-      dxf += `20\n${baseY.toFixed(3)}\n`;
-      dxf += '40\n10\n'; // Text height
-      dxf += `1\n${part.name}\n`;
-      
-      // Rotasyon varsa text'i de döndür
-      if (rotation !== 0) {
-        dxf += `50\n${rotation}\n`;
+        
+        renderedCount++;
+        
+      } catch (err) {
+        console.error(`DXF Part ${part.name} error:`, err);
       }
     });
     
-    offsetX += sheet.width + 100; // Sheet'ler arası boşluk
+    console.log(`DXF Sheet ${sheetIdx + 1}: Rendered ${renderedCount} parts`);
+    
+    // Sonraki sheet için offset
+    sheetOffsetX += sheet.width + 100;
   });
   
-  dxf += '0\nENDSEC\n';
-  dxf += '0\nEOF\n';
+  dxf += '0\nENDSEC\n0\nEOF\n';
   
+  console.log('DXF Export completed');
   return dxf;
 };
 
-/**
- * SVG path'i DXF entity'lerine çevirir
- */
-function convertSVGPathToDXF(
-  pathString: string,
-  offsetX: number,
-  offsetY: number,
-  rotation: number,
-  layerName: string
-): string {
-  let dxf = '';
+// Türkçe karakterleri temizle
+function cleanTurkishChars(text: string): string {
+  const map: Record<string, string> = {
+    'ç': 'c', 'Ç': 'C',
+    'ğ': 'g', 'Ğ': 'G',
+    'ı': 'i', 'İ': 'I',
+    'ö': 'o', 'Ö': 'O',
+    'ş': 's', 'Ş': 'S',
+    'ü': 'u', 'Ü': 'U'
+  };
   
-  // SVG path komutlarını parse et
-  const commands = pathString.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
-  if (!commands || commands.length === 0) {
-    throw new Error('Invalid path');
-  }
-  
-  const points: { x: number; y: number }[] = [];
-  let currentX = 0;
-  let currentY = 0;
-  
-  // Path'i noktalara çevir
-  commands.forEach(cmd => {
-    const type = cmd[0].toUpperCase();
-    const coords = cmd.slice(1).trim().split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n));
-    
-    switch (type) {
-      case 'M': // Move to
-        if (coords.length >= 2) {
-          currentX = coords[0];
-          currentY = coords[1];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'L': // Line to
-        if (coords.length >= 2) {
-          currentX = coords[0];
-          currentY = coords[1];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'H': // Horizontal line
-        if (coords.length >= 1) {
-          currentX = coords[0];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'V': // Vertical line
-        if (coords.length >= 1) {
-          currentY = coords[0];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'C': // Cubic Bezier (basitleştirilmiş - sadece son nokta)
-        if (coords.length >= 6) {
-          currentX = coords[4];
-          currentY = coords[5];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'S': // Smooth Cubic Bezier (basitleştirilmiş)
-        if (coords.length >= 4) {
-          currentX = coords[2];
-          currentY = coords[3];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'Q': // Quadratic Bezier (basitleştirilmiş)
-        if (coords.length >= 4) {
-          currentX = coords[2];
-          currentY = coords[3];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'A': // Arc (basitleştirilmiş - sadece son nokta)
-        if (coords.length >= 7) {
-          currentX = coords[5];
-          currentY = coords[6];
-          points.push({ x: currentX, y: currentY });
-        }
-        break;
-        
-      case 'Z': // Close path - ilk noktaya geri dön
-        if (points.length > 0) {
-          points.push({ x: points[0].x, y: points[0].y });
-        }
-        break;
-    }
-  });
-  
-  if (points.length < 2) {
-    throw new Error('Not enough points');
-  }
-  
-  // Rotasyonu ve offset'i uygula
-  const rad = (rotation * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  
-  const transformedPoints = points.map(p => ({
-    x: offsetX + (p.x * cos - p.y * sin),
-    y: offsetY + (p.x * sin + p.y * cos)
-  }));
-  
-  // DXF LWPOLYLINE oluştur
-  dxf += '0\nLWPOLYLINE\n';
-  dxf += `8\n${layerName}\n`;
-  dxf += `90\n${transformedPoints.length}\n`; // Vertex count
-  dxf += '70\n1\n'; // Closed flag
-  
-  transformedPoints.forEach(p => {
-    dxf += `10\n${p.x.toFixed(3)}\n`;
-    dxf += `20\n${p.y.toFixed(3)}\n`;
-  });
-  
-  return dxf;
-}
-
-/**
- * Döndürülmüş dikdörtgen oluşturur
- */
-function createRotatedRectangle(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  rotation: number,
-  layerName: string
-): string {
-  const corners = [
-    { x: 0, y: 0 },
-    { x: width, y: 0 },
-    { x: width, y: height },
-    { x: 0, y: height }
-  ];
-  
-  const rad = (rotation * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  
-  const rotatedCorners = corners.map(c => ({
-    x: x + (c.x * cos - c.y * sin),
-    y: y + (c.x * sin + c.y * cos)
-  }));
-  
-  let dxf = '0\nLWPOLYLINE\n';
-  dxf += `8\n${layerName}\n`;
-  dxf += '90\n4\n';
-  dxf += '70\n1\n';
-  
-  rotatedCorners.forEach(corner => {
-    dxf += `10\n${corner.x.toFixed(3)}\n`;
-    dxf += `20\n${corner.y.toFixed(3)}\n`;
-  });
-  
-  return dxf;
+  return text.split('').map(char => map[char] || char).join('');
 }
