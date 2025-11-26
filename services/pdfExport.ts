@@ -4,12 +4,17 @@
  */
 
 import { Sheet, NestingStats } from '../types';
+import { jsPDF } from 'jspdf';
 
 export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: string): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     try {
-      // jsPDF'i dinamik import edelim (package.json'a eklenmesi gerekecek)
-      import('jspdf').then(({ jsPDF }) => {
+      // jsPDF ile PDF oluştur
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
         const doc = new jsPDF({
           orientation: 'landscape',
           unit: 'mm',
@@ -196,8 +201,6 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         const pdfBlob = doc.output('blob');
         resolve(pdfBlob);
         
-      }).catch(reject);
-      
     } catch (error) {
       reject(error);
     }

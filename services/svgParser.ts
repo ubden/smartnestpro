@@ -14,14 +14,27 @@ export const parseSVG = (svgContent: string): ParsedShape | null => {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svgContent, 'image/svg+xml');
+    
+    // Parse hatası kontrolü
+    const parserError = doc.querySelector('parsererror');
+    if (parserError) {
+      console.error('SVG parse error:', parserError.textContent);
+      return null;
+    }
+    
     const svg = doc.querySelector('svg');
     
-    if (!svg) throw new Error('Invalid SVG');
+    if (!svg) {
+      console.error('No SVG element found');
+      return null;
+    }
 
     // ViewBox'tan boyutları al
     const viewBox = svg.getAttribute('viewBox');
     let width = parseFloat(svg.getAttribute('width') || '0');
     let height = parseFloat(svg.getAttribute('height') || '0');
+    
+    console.log('SVG attributes:', { viewBox, width, height });
     
     let vbX = 0, vbY = 0, vbW = 0, vbH = 0;
     
@@ -107,20 +120,28 @@ export const parseSVG = (svgContent: string): ParsedShape | null => {
 
     // Tüm path'leri birleştir
     const combinedPath = paths.join(' ');
+    
+    console.log('Paths found:', paths.length);
+    console.log('Combined path:', combinedPath.substring(0, 100) + '...');
 
     // Eğer boyut yoksa, path'ten hesapla
     if (!width || !height) {
+      console.log('Calculating bounds from path...');
       const bbox = calculatePathBounds(combinedPath);
       width = bbox.width;
       height = bbox.height;
+      console.log('Calculated bounds:', { width, height });
     }
 
-    return {
+    const result = {
       path: combinedPath,
       width: Math.round(width * 100) / 100,
       height: Math.round(height * 100) / 100,
       viewBox: viewBox ? { x: vbX, y: vbY, width: vbW, height: vbH } : undefined
     };
+    
+    console.log('SVG parse result:', result);
+    return result;
   } catch (error) {
     console.error('SVG Parse Error:', error);
     return null;
