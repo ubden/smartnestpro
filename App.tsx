@@ -1,23 +1,29 @@
 
 import React, { useState, useRef } from 'react';
-import { Settings, Play, Plus, Trash2, Layers, Download, Upload, Maximize2, FileCode, AlertCircle, Package, Cuboid, ChevronDown, LayoutTemplate, Loader2, XCircle, FileJson, FileSpreadsheet } from 'lucide-react';
+import { Settings, Play, Plus, Trash2, Layers, Download, Upload, Maximize2, FileCode, AlertCircle, Package, Cuboid, ChevronDown, LayoutTemplate, Loader2, XCircle, FileJson, FileSpreadsheet, Shapes, FilePlus2 } from 'lucide-react';
 import { Sheet, Part, NestingStats, AIAnalysisResult, PlacedPart, StockItem } from './types';
 import { MOCK_PARTS, getRandomColor, DEFAULT_SHEET_HEIGHT, DEFAULT_SHEET_WIDTH } from './constants';
 import { analyzeNestingResult } from './services/geminiService';
+import { parseSVG } from './services/svgParser';
+import { parseDXF } from './services/dxfParser';
+import { exportDXF } from './services/dxfExport';
+import { exportPDF } from './services/pdfExport';
 import { Button } from './components/ui/Button';
 import { Input } from './components/ui/Input';
 import { SettingsModal } from './components/SettingsModal';
 import { NestingCanvas, NestingCanvasRef } from './components/NestingCanvas';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { PartPreview } from './components/PartPreview';
+import { ShapeLibraryModal } from './components/ShapeLibraryModal';
+import { ShapeTemplate } from './constants/shapeLibrary';
 
 // --- Advanced Nesting Algorithm: Arbitrary Rotation Raster Packing ---
 
-// Scale 0.15 means 1px = 6.67mm. Balanced precision with excellent performance.
-const SCALE = 0.15; 
+// Scale 0.1 means 1px = 10mm. Balanced precision with excellent performance.
+const SCALE = 0.1; 
 
-// Rotation angles to test (90-degree increments for speed, can add 45° if needed)
-const ROTATION_ANGLES = [0, 90, 180, 270]; 
+// Rotation angles to test (45-degree increments for speed, can add 90° if needed)
+const ROTATION_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315]; 
 
 interface PartMask {
   width: number;
@@ -366,6 +372,7 @@ function App() {
 
   const [parts, setParts] = useState<Part[]>(MOCK_PARTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isShapeLibraryOpen, setIsShapeLibraryOpen] = useState(false);
   
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [activeSheetIdx, setActiveSheetIdx] = useState(0);
@@ -442,16 +449,19 @@ function App() {
   };
 
   const addPart = () => {
-    const w = 200;
-    const h = 200;
+    // Şekil kütüphanesini aç
+    setIsShapeLibraryOpen(true);
+  };
+
+  const handleShapeSelect = (shape: ShapeTemplate) => {
     const newPart: Part = {
       id: Math.random().toString(36).substr(2, 9),
-      name: `Part ${parts.length + 1}`,
-      width: w,
-      height: h,
+      name: `${shape.name} ${parts.length + 1}`,
+      width: shape.width,
+      height: shape.height,
       quantity: 1,
       color: getRandomColor(),
-      path: `M0,0 L${w},0 L${w},${h} L0,${h} Z`
+      path: shape.path
     };
     setParts([...parts, newPart]);
   };
@@ -489,43 +499,73 @@ function App() {
     if (activeStockId === id) setActiveStockId(stockItems[0].id);
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const content = e.target?.result as string;
-        if (file.name.endsWith('.json')) {
-            const imported = JSON.parse(content);
-            if (Array.isArray(imported) && imported.length > 0) {
-                 const formattedParts: Part[] = imported.map((p: any) => ({
-                    id: Math.random().toString(36).substr(2, 9),
-                    name: p.name || 'Imported',
-                    width: Number(p.width) || 100,
-                    height: Number(p.height) || 100,
-                    quantity: Number(p.quantity) || 1,
-                    color: getRandomColor(),
-                    path: p.path || `M0,0 L${p.width || 100},0 L${p.width || 100},${p.height || 100} L0,${p.height || 100} Z`
-                }));
-                setParts([...parts, ...formattedParts]);
-            }
-        } else {
-             alert("Mock import of CAD file.");
-             const newPart: Part = {
-                 id: Math.random().toString(36).substr(2, 9),
-                 name: file.name,
-                 width: 300,
-                 height: 200,
-                 quantity: 1,
-                 color: getRandomColor(),
-                 path: 'M0,0 L300,0 L300,200 L150,150 L0,200 Z' 
+        
+        if (file.name.endsWith('.svg')) {
+          // SVG import
+          const parsed = parseSVG(content);
+          if (parsed) {
+            const newPart: Part = {
+              id: Math.random().toString(36).substr(2, 9),
+              name: file.name.replace('.svg', ''),
+              width: parsed.width,
+              height: parsed.height,
+              quantity: 1,
+              color: getRandomColor(),
+              path: parsed.path
             };
             setParts([...parts, newPart]);
+            alert(`✅ SVG başarıyla import edildi!\nBoyut: ${parsed.width} × ${parsed.height} mm`);
+          } else {
+            alert('❌ SVG dosyası okunamadı. Lütfen geçerli bir SVG dosyası yükleyin.');
+          }
+        } else if (file.name.endsWith('.dxf')) {
+          // DXF import
+          const parsed = parseDXF(content);
+          if (parsed) {
+            const newPart: Part = {
+              id: Math.random().toString(36).substr(2, 9),
+              name: file.name.replace('.dxf', ''),
+              width: parsed.width,
+              height: parsed.height,
+              quantity: 1,
+              color: getRandomColor(),
+              path: parsed.path
+            };
+            setParts([...parts, newPart]);
+            alert(`✅ DXF başarıyla import edildi!\nBoyut: ${parsed.width} × ${parsed.height} mm\nEntity: ${parsed.entities.join(', ')}`);
+          } else {
+            alert('❌ DXF dosyası okunamadı. Lütfen geçerli bir DXF dosyası yükleyin.');
+          }
+        } else if (file.name.endsWith('.json')) {
+          // JSON import
+          const imported = JSON.parse(content);
+          if (Array.isArray(imported) && imported.length > 0) {
+            const formattedParts: Part[] = imported.map((p: any) => ({
+              id: Math.random().toString(36).substr(2, 9),
+              name: p.name || 'Imported',
+              width: Number(p.width) || 100,
+              height: Number(p.height) || 100,
+              quantity: Number(p.quantity) || 1,
+              color: getRandomColor(),
+              path: p.path || `M0,0 L${p.width || 100},0 L${p.width || 100},${p.height || 100} L0,${p.height || 100} Z`
+            }));
+            setParts([...parts, ...formattedParts]);
+            alert(`✅ ${formattedParts.length} parça başarıyla import edildi!`);
+          }
+        } else {
+          alert('❌ Desteklenmeyen dosya formatı. Lütfen .svg, .dxf veya .json dosyası yükleyin.');
         }
       } catch (err) {
         console.error("Import failed", err);
+        alert('❌ Dosya import edilirken hata oluştu. Lütfen dosyayı kontrol edin.');
       }
     };
     reader.readAsText(file);
@@ -556,6 +596,39 @@ function App() {
         });
     });
     downloadFile(csv, `nesting_report_${Date.now()}.csv`, 'text/csv');
+  };
+
+  const handleExportDXF = () => {
+    if(sheets.length === 0) return;
+    try {
+      const dxfContent = exportDXF(sheets);
+      downloadFile(dxfContent, `nesting_${Date.now()}.dxf`, 'application/dxf');
+      alert('✅ DXF dosyası başarıyla oluşturuldu!');
+    } catch (error) {
+      console.error('DXF export error:', error);
+      alert('❌ DXF export sırasında hata oluştu.');
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if(sheets.length === 0 || !stats) return;
+    try {
+      const activeStock = stockItems.find(s => s.id === activeStockId);
+      const stockName = activeStock ? activeStock.name : 'Standard Stock';
+      
+      const pdfBlob = await exportPDF(sheets, stats, stockName);
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `technical_drawing_${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setIsExportMenuOpen(false);
+      alert('✅ PDF teknik çizim başarıyla oluşturuldu!');
+    } catch (error) {
+      console.error('PDF export error:', error);
+      alert('❌ PDF export sırasında hata oluştu. jsPDF kütüphanesi yüklü olmalıdır.');
+    }
   };
 
   return (
@@ -727,13 +800,20 @@ function App() {
                  </Button>
 
                  {isExportMenuOpen && (
-                    <div className="absolute bottom-full right-0 mb-2 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 z-50">
+                    <div className="absolute bottom-full right-0 mb-2 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 z-50">
                         <div className="p-2 space-y-1">
                             <button onClick={exportJSON} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded text-left">
                                 <FileJson size={14} className="text-indigo-400" /> Export Project (JSON)
                             </button>
                             <button onClick={exportCSV} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded text-left">
                                 <FileSpreadsheet size={14} className="text-emerald-400" /> Export Report (CSV)
+                            </button>
+                            <div className="h-px bg-slate-700 my-1" />
+                            <button onClick={handleExportDXF} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded text-left">
+                                <FileCode size={14} className="text-cyan-400" /> Export DXF (CAD)
+                            </button>
+                            <button onClick={handleExportPDF} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded text-left">
+                                <FilePlus2 size={14} className="text-rose-400" /> Export PDF (Technical)
                             </button>
                         </div>
                     </div>
@@ -754,6 +834,7 @@ function App() {
       </div>
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={apiKey} setApiKey={setApiKey} />
+      <ShapeLibraryModal isOpen={isShapeLibraryOpen} onClose={() => setIsShapeLibraryOpen(false)} onSelectShape={handleShapeSelect} />
     </div>
   );
 }
