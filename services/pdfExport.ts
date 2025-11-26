@@ -92,59 +92,91 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         doc.text(`${sheet.height} mm`, offsetX - 5, offsetY + (sheet.height * scale) / 2, { angle: 90, align: 'center' });
         
         // Part'ları çiz
-        sheet.placedParts.forEach((part, partIdx) => {
-          const px = offsetX + part.x * scale;
-          const py = offsetY + part.y * scale;
-          const pw = part.width * scale;
-          const ph = part.height * scale;
-          
-          // Part rengi (her part farklı ton)
-          const hue = (partIdx * 137.5) % 360; // Golden angle için
-          const rgb = hslToRgb(hue, 70, 85);
-          
-          doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-          doc.setDrawColor(50, 50, 50);
-          doc.setLineWidth(0.2);
-          
-          // Rotation varsa
-          if (part.rotation && part.rotation !== 0) {
-            doc.saveGraphicsState();
+        const maxPartsPerPage = 100; // Performans için limit
+        const partsToRender = sheet.placedParts.slice(0, maxPartsPerPage);
+        
+        if (sheet.placedParts.length > maxPartsPerPage) {
+          console.warn(`Sheet has ${sheet.placedParts.length} parts, rendering first ${maxPartsPerPage} for performance`);
+        }
+        
+        partsToRender.forEach((part, partIdx) => {
+          try {
+            const px = offsetX + part.x * scale;
+            const py = offsetY + part.y * scale;
+            const pw = part.width * scale;
+            const ph = part.height * scale;
             
-            const centerX = px + pw / 2;
-            const centerY = py + ph / 2;
+            // Part rengi (her part farklı ton)
+            const hue = (partIdx * 137.5) % 360; // Golden angle için
+            const rgb = hslToRgb(hue, 70, 85);
             
-            // Rotate around center
-            const rad = (part.rotation * Math.PI) / 180;
-            doc.setTransformationMatrix(
-              Math.cos(rad),
-              Math.sin(rad),
-              -Math.sin(rad),
-              Math.cos(rad),
-              centerX,
-              centerY
-            );
+            doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+            doc.setDrawColor(50, 50, 50);
+            doc.setLineWidth(0.2);
             
-            doc.rect(-pw / 2, -ph / 2, pw, ph, 'FD');
+            // Rotation varsa
+            if (part.rotation && part.rotation !== 0) {
+              doc.saveGraphicsState();
+              
+              const centerX = px + pw / 2;
+              const centerY = py + ph / 2;
+              
+              // Rotate around center
+              const rad = (part.rotation * Math.PI) / 180;
+              doc.setTransformationMatrix(
+                Math.cos(rad),
+                Math.sin(rad),
+                -Math.sin(rad),
+                Math.cos(rad),
+                centerX,
+                centerY
+              );
+              
+              // Gerçek path'i çiz (path varsa)
+              if (part.path && part.path.trim() !== '') {
+                try {
+                  drawSVGPath(doc, part.path, -pw / 2, -ph / 2, scale, part.width, part.height);
+                } catch (e) {
+                  // Path çizimi başarısızsa dikdörtgen çiz
+                  doc.rect(-pw / 2, -ph / 2, pw, ph, 'FD');
+                }
+              } else {
+                doc.rect(-pw / 2, -ph / 2, pw, ph, 'FD');
+              }
+              
+              // Part ismi
+              doc.setFontSize(6);
+              doc.setTextColor(50, 50, 50);
+              doc.text(part.name, 0, 0, { align: 'center' });
+              
+              doc.restoreGraphicsState();
+            } else {
+              // Gerçek path'i çiz (path varsa)
+              if (part.path && part.path.trim() !== '') {
+                try {
+                  drawSVGPath(doc, part.path, px, py, scale, part.width, part.height);
+                } catch (e) {
+                  // Path çizimi başarısızsa dikdörtgen çiz
+                  doc.rect(px, py, pw, ph, 'FD');
+                }
+              } else {
+                doc.rect(px, py, pw, ph, 'FD');
+              }
+              
+              // Part ismi
+              doc.setFontSize(6);
+              doc.setTextColor(50, 50, 50);
+              doc.text(part.name, px + pw / 2, py + ph / 2, { align: 'center' });
+            }
             
-            // Part ismi
-            doc.setFontSize(6);
-            doc.setTextColor(50, 50, 50);
-            doc.text(part.name, 0, 0, { align: 'center' });
-            
-            doc.restoreGraphicsState();
-          } else {
-            doc.rect(px, py, pw, ph, 'FD');
-            
-            // Part ismi
-            doc.setFontSize(6);
-            doc.setTextColor(50, 50, 50);
-            doc.text(part.name, px + pw / 2, py + ph / 2, { align: 'center' });
+            // Part boyutları (küçük fontla)
+            doc.setFontSize(5);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`${part.width}×${part.height}`, px + pw / 2, py + ph + 3, { align: 'center' });
+          } catch (partError) {
+            // Tek bir part hata verirse diğerlerine devam et
+            console.warn(`Part ${part.name} render error:`, partError);
           }
-          
-          // Part boyutları (küçük fontla)
-          doc.setFontSize(5);
-          doc.setTextColor(100, 100, 100);
-          doc.text(`${part.width}×${part.height}`, px + pw / 2, py + ph + 3, { align: 'center' });
         });
         
         // === PARTS TABLE ===
@@ -172,7 +204,7 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(6);
         
-        sheet.placedParts.slice(0, 3).forEach((part, i) => {
+        partsToRender.slice(0, 3).forEach((part, i) => {
           const y = tableY + 10 + i * 5;
           doc.text(part.name, margin + 2, y);
           doc.text(`${part.width} × ${part.height}`, margin + colWidth + 2, y);
@@ -183,7 +215,10 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         
         if (sheet.placedParts.length > 3) {
           doc.setTextColor(150, 150, 150);
-          doc.text(`... ve ${sheet.placedParts.length - 3} parça daha`, margin + 2, tableY + 24);
+          const remainingText = sheet.placedParts.length > maxPartsPerPage 
+            ? `... ve ${sheet.placedParts.length - 3} parça daha (PDF'de ilk ${maxPartsPerPage} gösteriliyor)`
+            : `... ve ${sheet.placedParts.length - 3} parça daha`;
+          doc.text(remainingText, margin + 2, tableY + 24);
         }
         
         // Footer
@@ -197,10 +232,106 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
       resolve(pdfBlob);
       
     } catch (error) {
+      console.error('PDF Export Error:', error);
       reject(error);
     }
   });
 };
+
+// SVG path'i jsPDF'e çizen helper fonksiyon
+function drawSVGPath(
+  doc: any,
+  pathString: string,
+  offsetX: number,
+  offsetY: number,
+  scale: number,
+  originalWidth: number,
+  originalHeight: number
+) {
+  // Basit SVG path komutlarını parse et
+  const commands = pathString.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
+  
+  if (!commands || commands.length === 0) {
+    throw new Error('Invalid path');
+  }
+  
+  let currentX = 0;
+  let currentY = 0;
+  let startX = 0;
+  let startY = 0;
+  
+  commands.forEach((cmd, idx) => {
+    const type = cmd[0].toUpperCase();
+    const coords = cmd.slice(1).trim().split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n));
+    
+    switch (type) {
+      case 'M': // Move to
+        if (coords.length >= 2) {
+          currentX = offsetX + (coords[0] * scale);
+          currentY = offsetY + (coords[1] * scale);
+          startX = currentX;
+          startY = currentY;
+          
+          if (idx === 0) {
+            // İlk moveTo - path'i başlat
+            doc.lines([[0, 0]], currentX, currentY, [scale, scale], 'FD');
+          }
+        }
+        break;
+        
+      case 'L': // Line to
+        if (coords.length >= 2) {
+          const nextX = offsetX + (coords[0] * scale);
+          const nextY = offsetY + (coords[1] * scale);
+          
+          doc.line(currentX, currentY, nextX, nextY);
+          currentX = nextX;
+          currentY = nextY;
+        }
+        break;
+        
+      case 'H': // Horizontal line
+        if (coords.length >= 1) {
+          const nextX = offsetX + (coords[0] * scale);
+          doc.line(currentX, currentY, nextX, currentY);
+          currentX = nextX;
+        }
+        break;
+        
+      case 'V': // Vertical line
+        if (coords.length >= 1) {
+          const nextY = offsetY + (coords[1] * scale);
+          doc.line(currentX, currentY, currentX, nextY);
+          currentY = nextY;
+        }
+        break;
+        
+      case 'Z': // Close path
+        if (currentX !== startX || currentY !== startY) {
+          doc.line(currentX, currentY, startX, startY);
+        }
+        currentX = startX;
+        currentY = startY;
+        break;
+        
+      // A (Arc) ve C (Cubic Bezier) gibi karmaşık komutlar için basitleştirilmiş çizim
+      case 'A':
+      case 'C':
+      case 'S':
+      case 'Q':
+        // Bu komutlar için son noktaya düz çizgi çek
+        if (coords.length >= 2) {
+          const lastIdx = coords.length - 2;
+          const nextX = offsetX + (coords[lastIdx] * scale);
+          const nextY = offsetY + (coords[lastIdx + 1] * scale);
+          doc.line(currentX, currentY, nextX, nextY);
+          currentX = nextX;
+          currentY = nextY;
+        }
+        break;
+    }
+  });
+}
 
 // HSL'den RGB'ye çevirme helper
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {

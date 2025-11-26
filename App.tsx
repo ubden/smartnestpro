@@ -625,9 +625,10 @@ function App() {
       URL.revokeObjectURL(url);
       setIsExportMenuOpen(false);
       alert('✅ PDF teknik çizim başarıyla oluşturuldu!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('PDF export error:', error);
-      alert('❌ PDF export sırasında hata oluştu. jsPDF kütüphanesi yüklü olmalıdır.');
+      const errorMessage = error?.message || 'Bilinmeyen hata';
+      alert(`❌ PDF export hatası:\n${errorMessage}\n\nÇok fazla parça varsa birkaç sheet'i ayrı ayrı export etmeyi deneyin.`);
     }
   };
 
