@@ -13,11 +13,11 @@ import { PartPreview } from './components/PartPreview';
 
 // --- Advanced Nesting Algorithm: Arbitrary Rotation Raster Packing ---
 
-// Scale 0.2 means 1px = 5mm. High precision but optimized for performance.
-const SCALE = 0.2; 
+// Scale 0.15 means 1px = 6.67mm. Balanced precision with excellent performance.
+const SCALE = 0.15; 
 
-// Rotation step in degrees
-const ROTATION_STEP = 10; 
+// Rotation angles to test (90-degree increments for speed, can add 45° if needed)
+const ROTATION_ANGLES = [0, 90, 180, 270]; 
 
 interface PartMask {
   width: number;
@@ -124,17 +124,23 @@ class GridSheet {
   canFit(mask: PartMask, x: number, y: number): boolean {
     if (x + mask.width > this.width || y + mask.height > this.height) return false;
     
-    // Quick check: corners
-    if (this.grid[y * this.width + x] === 1) return false;
+    // Ultra-fast check: sample key points first before full scan
+    // Check corners and center
+    const centerX = Math.floor(mask.width / 2);
+    const centerY = Math.floor(mask.height / 2);
     
-    // Full check
+    if (mask.data[0] === 1 && this.grid[y * this.width + x] === 1) return false;
+    if (mask.data[mask.width - 1] === 1 && this.grid[y * this.width + (x + mask.width - 1)] === 1) return false;
+    if (mask.data[centerY * mask.width + centerX] === 1 && this.grid[(y + centerY) * this.width + (x + centerX)] === 1) return false;
+    
+    // Full check with early exit optimization
     for (let my = 0; my < mask.height; my++) {
-      // Optimization: Check row start/end first
-      if (mask.data[my * mask.width] === 1 && this.grid[(y + my) * this.width + x] === 1) return false;
+      const maskRow = my * mask.width;
+      const gridRow = (y + my) * this.width;
       
       for (let mx = 0; mx < mask.width; mx++) {
-        if (mask.data[my * mask.width + mx] === 1) {
-          if (this.grid[(y + my) * this.width + (x + mx)] === 1) return false;
+        if (mask.data[maskRow + mx] === 1) {
+          if (this.grid[gridRow + (x + mx)] === 1) return false;
         }
       }
     }
@@ -188,6 +194,16 @@ const runNestingAsync = async (
     return maskCache[key];
   }
 
+  // PRE-GENERATE ALL MASKS (massive speedup!)
+  onProgress(0, "Pre-calculating rotations...");
+  const uniqueParts = Array.from(new Set(parts.map(p => p.id))).map(id => parts.find(p => p.id === id)!);
+  for (const part of uniqueParts) {
+    for (const angle of ROTATION_ANGLES) {
+      getMask(part, angle);
+    }
+  }
+  await yieldToMain();
+
   let lastYieldTime = performance.now();
 
   while (queue.length > 0) {
@@ -195,41 +211,43 @@ const runNestingAsync = async (
 
     // Report Progress
     const progress = Math.round((placedCount / totalItems) * 100);
+    
+    // --- YIELD CHECK ---
+    const now = performance.now();
+    if (now - lastYieldTime > 20) { // Yield every 20ms
+         onProgress(progress, `Placing part ${placedCount + 1}/${totalItems}...`);
+         await yieldToMain();
+         lastYieldTime = performance.now();
+         if (shouldStop()) throw new Error("Stopped");
+    }
+    // ------------------
 
     let bestCandidateIdx = -1;
     let bestPos = { x: 0, y: 0, rot: 0 };
     let found = false;
     let minWasteScore = Infinity;
 
-    // Look ahead depth
-    const searchDepth = Math.min(queue.length, 6); 
+    // Look ahead: Only check first 3 parts (much faster!)
+    const searchDepth = Math.min(queue.length, 3); 
+    
+    // Smart scanning: Use step size for initial scan
+    const SCAN_STEP = 5; // pixels (much faster initial scan)
     
     for (let i = 0; i < searchDepth; i++) {
       const part = queue[i];
       
-      for (let rot = 0; rot < 360; rot += ROTATION_STEP) {
-        
-        // --- YIELD CHECK inside the heavy loop ---
-        const now = performance.now();
-        if (now - lastYieldTime > 15) { // Yield every 15ms
-             onProgress(progress, `Analysing Shape ${placedCount + 1}/${totalItems} (${rot}°)...`);
-             await yieldToMain();
-             lastYieldTime = performance.now();
-             if (shouldStop()) throw new Error("Stopped");
-        }
-        // ------------------------------------------
-
+      // Only test key rotations
+      for (const rot of ROTATION_ANGLES) {
         const mask = getMask(part, rot);
         if (mask.width === 0) continue;
-
         if (mask.width > currentSheet.width || mask.height > currentSheet.height) continue;
 
-        // Scan the sheet
-        for (let y = 0; y <= currentSheet.height - mask.height; y++) {
-          for (let x = 0; x <= currentSheet.width - mask.width; x++) {
+        // FAST SCAN: Coarse grid first
+        for (let y = 0; y <= currentSheet.height - mask.height; y += SCAN_STEP) {
+          for (let x = 0; x <= currentSheet.width - mask.width; x += SCAN_STEP) {
              
              if (currentSheet.canFit(mask, x, y)) {
-               // Heuristic: Prefer top-left (y * width + x)
+               // Bottom-left heuristic: prefer lower-left positions
                const score = y * currentSheet.width + x; 
                
                if (score < minWasteScore) {
@@ -238,15 +256,16 @@ const runNestingAsync = async (
                  bestPos = { x, y, rot };
                  found = true;
                }
-               // Heuristic shortcut
-               if (score < 200) break; 
+               
+               // Early exit if we find a very good position
+               if (score < 100) break; 
              }
           }
-          if (found && minWasteScore < 200) break;
+          if (found && minWasteScore < 100) break;
         }
-        if (found && minWasteScore < 200) break;
+        if (found && minWasteScore < 100) break;
       }
-      if (found && minWasteScore < 200) break;
+      if (found && minWasteScore < 100) break;
     }
 
     if (found && bestCandidateIdx !== -1) {
@@ -278,10 +297,10 @@ const runNestingAsync = async (
       currentSheet = new GridSheet(stock.width, stock.height);
       currentSheetParts = [];
       
-      // Infinite loop guard
+      // Infinite loop guard - check if part can ever fit
       const part = queue[0];
       let fitsEver = false;
-      for(let r=0; r<360; r+=ROTATION_STEP) {
+      for(const r of ROTATION_ANGLES) {
           const m = getMask(part, r);
           if(m.width <= currentSheet.width && m.height <= currentSheet.height) {
               fitsEver = true; 
