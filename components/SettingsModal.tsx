@@ -91,8 +91,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, a
             <Button onClick={handleSave} className="flex-1">Save Configuration</Button>
           </div>
           
-          <div className="text-center">
-             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 hover:underline">
+          <div className="text-center pt-4 border-t border-slate-800">
+             <p className="text-[10px] text-slate-600 mb-2">SmartNest Pro</p>
+             <p className="text-xs text-slate-500">Powered by <span className="font-semibold text-indigo-400">Ubden<sup className="text-[8px]">®</sup></span></p>
+             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 hover:underline block mt-2">
                Get a Gemini API Key &rarr;
              </a>
           </div>

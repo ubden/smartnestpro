@@ -211,7 +211,7 @@ export const exportPDF = (sheets: Sheet[], stats: NestingStats, stockName: strin
         
         doc.setFontSize(6);
         doc.setTextColor(150, 150, 150);
-        doc.text('SmartNest Pro', pageWidth / 2, pageHeight - 5, { align: 'center' });
+        doc.text('SmartNest Pro - Powered by Ubden', pageWidth / 2, pageHeight - 5, { align: 'center' });
       });
       
       const pdfBlob = doc.output('blob');

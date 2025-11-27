@@ -87,9 +87,14 @@ export const ShapeLibraryModal: React.FC<ShapeLibraryModalProps> = ({ isOpen, on
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between shrink-0">
-          <p className="text-xs text-slate-500">
-            Toplam {SHAPE_LIBRARY.length} şekil mevcut
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              Toplam {SHAPE_LIBRARY.length} şekil mevcut
+            </p>
+            <p className="text-[10px] text-slate-600">
+              Powered by <span className="text-indigo-400 font-semibold">Ubden<sup>®</sup></span>
+            </p>
+          </div>
           <Button variant="ghost" onClick={onClose}>
             Kapat
           </Button>

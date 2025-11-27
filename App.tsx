@@ -643,7 +643,7 @@ function App() {
             <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent leading-none">
               SmartNest <span className="font-light italic text-indigo-400">Pro</span>
             </h1>
-            <p className="text-[10px] text-slate-500 font-medium tracking-wider">AI-POWERED CAM SUITE</p>
+            <p className="text-[10px] text-slate-500 font-medium tracking-wider">POWERED BY UBDEN<sup className="text-[6px]">®</sup></p>
           </div>
         </div>
         
